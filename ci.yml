@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - day-2/repository-integration
+
+permissions:
+  contents: read
+
+jobs:
+  repository-ci:
+    name: Repository CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Verify package manifest
+        run: node -e "const p=require('./package.json'); if(!p.scripts?.check || !p.scripts?.test) process.exit(1);"
+
+      - name: Syntax check
+        run: npm run check
+
+      - name: Test
+        run: npm test
+
+      - name: Secret exposure baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tracked_env="$(git ls-files | grep -E '(^|/)\.env(\.|$)' | grep -vE '(^|/)\.env\.example$' || true)"
+          if [ -n "$tracked_env" ]; then
+            echo "ERROR: tracked .env file(s) found:"
+            printf '%s\n' "$tracked_env"
+            exit 1
+          fi
+
+          secret_hits="$(git grep -nEI \
+            'AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{20,}|-----BEGIN (RSA|EC|OPENSSH|DSA|PRIVATE) KEY-----|(^|[^A-Za-z])sk_live_[A-Za-z0-9]+|(^|[^A-Za-z])xox[baprs]-[0-9A-Za-z-]+' \
+            -- . ':!*.md' || true)"
+
+          if [ -n "$secret_hits" ]; then
+            echo "ERROR: secret-like material detected in tracked source:"
+            printf '%s\n' "$secret_hits"
+            exit 1
+          fi
+
+          echo "Secret exposure baseline: PASS (no secret values printed)."
