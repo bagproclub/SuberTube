@@ -34,6 +34,12 @@ jobs:
           yes | sdkmanager --licenses || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Temporarily stash .git for integrity safety
+        run: |
+          if [ -d .git ]; then
+            mv .git .git_ci_stash
+          fi
+
       - name: Decode Release Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -42,7 +48,7 @@ jobs:
             echo "::error::RELEASE_KEYSTORE_BASE64 secret is not set!"
             exit 1
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > android/app/keystore.jks
+          echo "$KEYSTORE_BASE64" | tr -d '\r\n' | base64 -d > android/app/keystore.jks
           if [ ! -s android/app/keystore.jks ]; then
             echo "::error::Decoded keystore file is empty or invalid!"
             exit 1
@@ -58,6 +64,13 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Always restore .git
+        if: always()
+        run: |
+          if [ -d .git_ci_stash ]; then
+            mv .git_ci_stash .git
+          fi
 
       - name: Verify and Upload Release APK
         uses: actions/upload-artifact@v4
