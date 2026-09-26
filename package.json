@@ -1,0 +1,15 @@
+{
+  "name": "subertube-security-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Day 1 security-gateway scaffold for SuberTube URL safety and domain/hosting boundaries.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/url-safety.js && node --check src/providers/malwarebytes.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

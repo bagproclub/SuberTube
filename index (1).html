@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1A1A1A">
+  <meta name="description" content="SuberTube — PLAY BEYOND LIMITS">
+  <title>SuberTube</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header" data-header>
+    <div class="header-inner">
+      <a class="brand" href="index.html" aria-label="SuberTube หน้าหลัก">
+        <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true" focusable="false">
+          <path d="M5 4.5c-1.5-.9-3.3.2-3.3 2v5.1c0 .9.5 1.7 1.3 2.1l6.2 3.5-6.2 3.5c-.8.4-1.3 1.2-1.3 2.1v.7c0 1.8 1.9 2.9 3.4 1.9l13.6-8.4c1.5-.9 1.5-3 0-3.9L5 4.5Z" fill="currentColor"/>
+          <path d="M11 9.1 18.1 13 11 16.9 8.2 15.3l4.2-2.3-4.2-2.3L11 9.1Z" fill="#1A1A1A"/>
+        </svg>
+        <span class="brand-name"><span>Suber</span><strong>Tube</strong></span>
+      </a>
+
+      <nav class="header-actions" aria-label="ส่วนควบคุมหลัก">
+        <button class="icon-button notification-button" type="button" aria-label="การแจ้งเตือน" data-notification>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>
+          </svg>
+          <span class="notification-dot" aria-hidden="true"></span>
+        </button>
+
+        <button class="icon-button" type="button" aria-label="ค้นหา" data-shell-control data-search-trigger>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="10.8" cy="10.8" r="6.8"/>
+            <path d="m16 16 5 5"/>
+          </svg>
+        </button>
+
+        <button class="profile-button" type="button" aria-label="โปรไฟล์ผู้เข้าพัก" data-shell-control data-profile-trigger>
+          <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <circle cx="16" cy="16" r="15" fill="#0F1512" stroke="#00E676" stroke-width="2"/>
+            <circle cx="16" cy="13" r="5.2" fill="#F1C6A8"/>
+            <path d="M9.7 25c1.2-4 3.3-5.8 6.3-5.8s5.1 1.8 6.3 5.8" fill="#111"/>
+            <path d="M10.2 12c.7-4.1 3.1-6.2 5.8-6.2 3.1 0 5.7 2.2 6 6.1-1.5-1.1-2.8-2-5.4-2.1-2.2 0-4.1.8-6.4 2.2Z" fill="#202020"/>
+          </svg>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell-main">
+    <section class="search-entry" aria-labelledby="search-title">
+      <p class="eyebrow">CONTENT DISCOVERY</p>
+      <h1 id="search-title">ค้นหาบน YouTube</h1>
+      <p class="search-copy">ค้นหาผ่าน Official YouTube Search ภายในแอป เมื่อทำงานบน Android ผลลัพธ์จะยังอยู่ใน WebView</p>
+      <form class="search-form" data-search-form novalidate>
+        <label class="visually-hidden" for="search-input">คำค้นหา YouTube</label>
+        <input id="search-input" name="q" type="search" inputmode="search" autocomplete="off" placeholder="พิมพ์สิ่งที่ต้องการค้นหา..." data-search-input>
+        <button class="search-submit" type="submit">ค้นหา</button>
+      </form>
+      <p class="search-status" data-search-status aria-live="polite"></p>
+    </section>
+
+    <section class="video-entry" aria-labelledby="video-title">
+      <p class="eyebrow">OFFICIAL PLAYER</p>
+      <h2 id="video-title">เปิดวิดีโอ YouTube</h2>
+      <p class="video-copy">วางลิงก์วิดีโอ YouTube เพื่อเปิดผ่าน Official YouTube IFrame Player</p>
+      <form class="video-form" data-video-form novalidate>
+        <label class="visually-hidden" for="video-input">ลิงก์วิดีโอ YouTube</label>
+        <input id="video-input" name="video-url" type="url" inputmode="url" autocomplete="off" placeholder="วางลิงก์ YouTube..." data-video-input>
+        <button class="video-submit" type="submit">เปิดวิดีโอ</button>
+      </form>
+      <p class="video-status" data-video-status aria-live="polite"></p>
+      <div class="video-actions">
+        <button class="secondary-action" type="button" data-save-library>บันทึกลงคลัง</button>
+      </div>
+      <div class="player-shell" data-player-shell hidden>
+        <div class="player-frame" data-player-frame></div>
+      </div>
+    </section>
+
+    <section class="profile-entry" aria-labelledby="profile-title">
+      <p class="eyebrow">PROFILE</p>
+      <h2 id="profile-title">โปรไฟล์ในแอป</h2>
+      <p class="profile-copy">Guest ใช้งานได้ทันที และสามารถเพิ่มหรือลบโปรไฟล์ในเครื่องได้ โดยไม่เก็บข้อมูลรับรองบัญชี</p>
+      <div class="profile-summary" data-profile-summary></div>
+    </section>
+
+    <section class="library-history" aria-labelledby="library-title">
+      <p class="eyebrow">BROWSER-LOCAL STATE</p>
+      <h2 id="library-title">คลังและประวัติ</h2>
+      <div class="library-grid">
+        <div class="library-card">
+          <h3>คลังของฉัน</h3>
+          <ul class="library-list" data-library-list></ul>
+        </div>
+        <div class="library-card">
+          <h3>ประวัติการเปิด</h3>
+          <ul class="library-list" data-history-list></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-backdrop" data-profile-backdrop hidden></div>
+  <section class="profile-sheet" role="dialog" aria-modal="true" aria-labelledby="profile-sheet-title" data-profile-sheet hidden>
+    <div class="profile-sheet-inner">
+      <div class="profile-sheet-header">
+        <div>
+          <p class="eyebrow">PROFILE</p>
+          <h2 id="profile-sheet-title">โปรไฟล์ในแอป</h2>
+        </div>
+        <button class="icon-close" type="button" aria-label="ปิด" data-profile-close>×</button>
+      </div>
+      <p class="profile-note">ไม่มีโปรไฟล์ก็เล่นวิดีโอที่อนุญาตได้ตามปกติ</p>
+      <form class="profile-form" data-profile-form novalidate>
+        <label for="profile-name">ชื่อโปรไฟล์</label>
+        <input id="profile-name" name="profile-name" type="text" maxlength="40" autocomplete="off" placeholder="เช่น แบ็ก" data-profile-input>
+        <div class="profile-form-actions">
+          <button type="submit" class="search-submit">เพิ่มโปรไฟล์</button>
+          <button type="button" class="secondary-action" data-profile-close>ยกเลิก</button>
+        </div>
+      </form>
+      <div class="profile-list-wrap">
+        <h3>โปรไฟล์ที่บันทึกในเครื่อง</h3>
+        <ul class="profile-list" data-profile-list></ul>
+      </div>
+    </div>
+  </section>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
