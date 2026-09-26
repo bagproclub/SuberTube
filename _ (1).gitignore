@@ -1,0 +1,30 @@
+# Local secrets / runtime configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Build / coverage / caches
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+
+# Local runtime data
+*.sqlite
+*.sqlite3
+*.db
+
+# Temporary artifacts
+*.tmp
+*.log
