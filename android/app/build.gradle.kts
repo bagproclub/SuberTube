@@ -14,10 +14,29 @@ android {
         versionName = "1.0.0"
     }
 
-    // ✅ Signing configuration for Release builds
+    // ✅ Signing configuration for Release builds with path resolution fallback
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("KEYSTORE_PATH") ?: "keystore.jks")
+            val rawPath = System.getenv("KEYSTORE_PATH") ?: "keystore.jks"
+            val moduleDir = file(rawPath)
+            val rootDir = rootProject.file(rawPath)
+            
+            // Try module-relative first, fallback to project-root relative
+            storeFile = when {
+                moduleDir.exists() -> {
+                    logger.info("✅ Keystore found at module-relative path: $rawPath")
+                    moduleDir
+                }
+                rootDir.exists() -> {
+                    logger.info("✅ Keystore found at project-root-relative path: $rawPath")
+                    rootDir
+                }
+                else -> {
+                    logger.warn("⚠️ Keystore not found: $rawPath (tried both module and project root)")
+                    moduleDir // fail later with clear error from gradle
+                }
+            }
+            
             storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
             keyAlias = System.getenv("KEY_ALIAS") ?: ""
             keyPassword = System.getenv("KEY_PASSWORD") ?: ""
