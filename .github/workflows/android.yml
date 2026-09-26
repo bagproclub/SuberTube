@@ -38,6 +38,7 @@ jobs:
         run: |
           if [ -d .git ]; then
             mv .git .git_ci_stash
+            echo "✅ .git stashed for safety during build"
           fi
 
       - name: Decode Release Keystore
@@ -48,11 +49,23 @@ jobs:
             echo "::error::RELEASE_KEYSTORE_BASE64 secret is not set!"
             exit 1
           fi
-          echo "$KEYSTORE_BASE64" | tr -d '\r\n' | base64 -d > android/app/keystore.jks
+          
+          # Strip all whitespace and line endings (handles CRLF from Windows/Web copy-paste)
+          CLEAN_B64=$(echo "$KEYSTORE_BASE64" | tr -d '\r\n ')
+          
+          # Decode and write to file
+          if ! echo "$CLEAN_B64" | base64 -d > android/app/keystore.jks 2>/dev/null; then
+            echo "::error::Failed to decode RELEASE_KEYSTORE_BASE64. Check for invalid Base64 encoding or line ending corruption."
+            exit 1
+          fi
+          
+          # Validate file exists and is not empty
           if [ ! -s android/app/keystore.jks ]; then
             echo "::error::Decoded keystore file is empty or invalid!"
             exit 1
           fi
+          
+          echo "✅ Keystore decoded successfully ($(stat -f%z android/app/keystore.jks 2>/dev/null || stat -c%s android/app/keystore.jks) bytes)"
 
       - name: Build Release APK
         working-directory: ./android
@@ -63,13 +76,16 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           chmod +x gradlew
+          echo "🔨 Starting Gradle build..."
           ./gradlew :app:assembleRelease --stacktrace
+          echo "✅ Build completed successfully"
 
       - name: Always restore .git
         if: always()
         run: |
           if [ -d .git_ci_stash ]; then
             mv .git_ci_stash .git
+            echo "✅ .git restored"
           fi
 
       - name: Verify and Upload Release APK
@@ -84,3 +100,4 @@ jobs:
         if: always()
         run: |
           rm -f android/app/keystore.jks
+          echo "✅ Keystore cleaned up securely"
