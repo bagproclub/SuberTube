@@ -1,2 +1,1 @@
-strings.xml gradle.properties.build.gradle (1).kts _.gitignore ปรับระบบการทำงานเหล่านี้ให้ทำงานสำพัน
-กันกับภาพรวมทั้งหมด ตรวจจากสิ่งที่มีแล้วปรับให้เข้ากัน 
+ตรวจ. strings.xml gradle.properties.build.gradle (1).kts _.gitignore และแก้ไขปัญหา โดยยึดหลักการมองภาพรวมทั้งระบบ แล้วแก้ไขปัญหาเฉพาะจุด โดยไม่กระทบภาพรวมโคลงสร้าง
