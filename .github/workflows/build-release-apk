@@ -1,0 +1,120 @@
+name: Android Release Build
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-release:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # --------------------------------------------------
+      # 1. Source
+      # --------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------
+      # 2. Node
+      # --------------------------------------------------
+      # ไม่เปิด npm cache
+      # เพราะ repository ไม่มี package-lock.json
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # --------------------------------------------------
+      # 3. Security preflight
+      # --------------------------------------------------
+      - name: Security preflight
+        run: |
+          node security-preflight.mjs
+
+      # --------------------------------------------------
+      # 4. Java
+      # --------------------------------------------------
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # --------------------------------------------------
+      # 5. Gradle
+      # --------------------------------------------------
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6"
+
+      # --------------------------------------------------
+      # 6. Build
+      # --------------------------------------------------
+      - name: Build Release APK
+        env:
+          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -e
+
+          gradle :app:assembleRelease \
+            --no-daemon \
+            --stacktrace
+
+      # --------------------------------------------------
+      # 7. Find APK
+      # --------------------------------------------------
+      - name: Find Release APK
+        shell: bash
+        run: |
+          set -e
+
+          APK=$(find . -type f -name "app-release.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "::error::app-release.apk was not generated"
+            exit 1
+          fi
+
+          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+
+          echo "Release APK:"
+          ls -lh "$APK"
+
+      # --------------------------------------------------
+      # 8. SHA256
+      # --------------------------------------------------
+      - name: Generate SHA256
+        shell: bash
+        run: |
+          set -e
+
+          sha256sum "$APK_PATH" | tee APK-SHA256SUM.txt
+
+      # --------------------------------------------------
+      # 9. Artifact
+      # --------------------------------------------------
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: |
+            ${{ env.APK_PATH }}
+            APK-SHA256SUM.txt
+          if-no-files-found: error
+          retention-days: 14
