@@ -1,25 +1,13 @@
-# SuberTube
-SuberTube — เว็บแอปสำหรับรับชม YouTube พร้อมระบบเล่นสื่อและสถาปัตยกรรมที่แยกส่วนอย่างปลอดภัย
-This commit is just the project’s initial documentation, not an implementation change.
+## การสร้างและติดตั้ง APK (Build & Release)
 
-What it does:
-- Creates a new file: README.md
-- Adds the project title:
-  - “SuberTube”
-- Adds a short description in Thai:
-  - “SuberTube — เว็บแอปสำหรับรับชม YouTube พร้อมระบบเล่นสื่อและสถาปัตยกรรมที่แยกส่วนอย่างปลอดภัย”
-  - Roughly: “SuberTube — a web app for watching YouTube with a media playback system and a securely separated architecture”
+โปรเจกต์ SuberTube ใช้ระบบ Automated CI/CD ผ่าน GitHub Actions พร้อมขั้นตอนตรวจสอบความปลอดภัยและ Integrity ก่อนปล่อยไฟล์ทุกครั้ง
 
-What this means:
-- The repository was just being initialized.
-- The project is being introduced as a YouTube viewing web app.
-- It hints at a design with:
-  - media playback functionality
-  - a modular / decoupled architecture
-  - security-conscious separation of components
+### ขั้นตอนการสร้าง APK
+1. ไปที่แท็บ **Actions** บน GitHub
+2. เลือกเวิร์กโฟลว์ **Android Release Build** ทางซ้ายมือ
+3. คลิก **Run workflow** บนสาขา `main`
+4. เมื่อกระบวนการเสร็จสิ้น สามารถดาวน์โหลด `app-release.apk` ได้จากส่วน **Artifacts**
 
-Important note:
-- This is not app code or feature work.
-- It’s only the project’s introductory README, which is standard for a first commit.
-
-So in plain English: this change establishes what the project is and what it aims to do, without adding actual functionality yet.
+### ขั้นตอนตรวจสอบความปลอดภัยและการอนุมัติ
+ก่อนนำไฟล์ APK ไปติดตั้งบนอุปกรณ์จริง ต้องปฏิบัติตามขั้นตอนตรวจสอบ SHA256 และการสแกนด้วย Malwarebytes ตามเกณฑ์สถานะความปลอดภัย:
+👉 **อ่านขั้นตอนและแบบบันทึกผลได้ที่:** [`docs/DEPLOYMENT-RUNBOOK.md`](docs/DEPLOYMENT-RUNBOOK.md)
