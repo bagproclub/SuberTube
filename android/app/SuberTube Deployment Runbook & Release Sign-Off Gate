@@ -1,0 +1,85 @@
+SuberTube Deployment Runbook & Release Sign-Off Gate
+Document Version: 1.0.0
+Initial Approval Status: CONDITIONAL
+Target: SuberTube Release APK (app-release.apk)
+
+1. Overview & Gate Preconditions
+This runbook defines the mandatory verification procedure required to transition SuberTube from CONDITIONAL to fully APPROVED deployment status. No distribution or installation on production devices may take place until all four execution stages are completed and signed off.
+
+Gate Status Definitions
+CONDITIONAL (Current Baseline): Source code, static regression tests, security preflights, and local asset isolation verified. Binary APK compilation, standalone checksum validation, and antivirus scanning pending.
+APPROVED: All checksums match, Malwarebytes scan returns zero threats, and technical leads have verified runtime integrity.
+BLOCKED: Any checksum mismatch, unauthorized secret exposure, foreign script injection, or malicious/suspicious malware verdict.
+2. Stage 1 — Build APK via GitHub Actions
+2.1 Preflight Configuration Check
+Ensure the repository contains the release workflow and required GitHub Secrets:
+
+Workflow path: .github/workflows/build-release-apk.yml
+Repository Secrets (Settings > Secrets and variables > Actions):
+KEYSTORE_PATH: relative path or filename (e.g. keystore.jks)
+KEYSTORE_PASSWORD: keystore store password
+KEY_ALIAS: release key alias
+KEY_PASSWORD: private key password
+2.2 Execution
+Navigate to the repository on GitHub.
+Open the Actions tab.
+Select Android Release Build from the workflow sidebar.
+Click Run workflow -> select branch main -> click Run workflow.
+2.3 Verification & Artifact Collection
+Confirm all steps pass successfully:
+Node Quality Gate (npm test)
+Security Preflight (npm run security)
+Release Integrity (npm run integrity)
+Release Build (./gradlew :app:assembleRelease)
+In the completed workflow run summary, scroll to Artifacts.
+Download the artifact bundle app-release (contains app-release.apk and RELEASE-SHA256SUMS.txt).
+Extract the artifact into a dedicated staging directory:
+mkdir -p ./release-staging
+unzip app-release.zip -d ./release-staging
+3. Stage 2 — SHA256 Checksum Validation
+3.1 Calculate Binary Hash
+Run the standard SHA256 calculation against the compiled APK:
+
+cd ./release-staging
+sha256sum app-release.apk > APK-SHA256SUM.txt
+cat APK-SHA256SUM.txt
+3.2 Integrity Comparison & Evidence Logging
+Record the generated hash string into the release audit ledger.
+Validate that the APK was built from the signed release configuration and not a debug build:
+File size expectation: compressed release bundle typically between 2MB - 10MB.
+Header inspection verifies zip archive alignment and Android manifest compilation.
+4. Stage 3 — Malwarebytes Antivirus & Threat Scanning
+4.1 File Scanning
+Submit app-release.apk to Malwarebytes Endpoint Protection / Malwarebytes Mobile Scanner.
+In addition, submit the APK SHA256 hash or binary file to an authorized multi-engine analysis portal if mandated by internal security policy.
+4.2 Acceptance Criteria
+Evaluation Metric	Permissible Value	Action on Breach
+Malwarebytes Detection Result	0 Detections / Clean	Immediate BLOCKED
+Risk Score / Threat Assessment	0 / Safe	Immediate BLOCKED
+Suspicious PUP / Adware Triggers	None	Review Android WebView & Origin Rules
+Outbound Network Endpoints	Only *.youtube.com and local asset origin	Flag unexpected endpoints
+5. Stage 4 — Evidence Recording & Final Sign-Off
+5.1 Evidence Record Template
+Fill in the following verification record upon completion:
+
+RELEASE EVIDENCE RECORD
+============================================================
+Release Version:            1.0.0
+Package Identifier:         com.subertube.app
+Target Architecture:        Android (Min SDK 26, Target SDK 36)
+Artifact File:              app-release.apk
+Calculated SHA256:          ________________________________________________________________
+Malwarebytes Scan Time:     ____________________ (UTC)
+Malwarebytes Verdict:       [ ] CLEAN    [ ] THREAT DETECTED
+Risk Score:                 ____________________
+Scan Engine Version:        ____________________
+Evidence File ID:           EV-RELEASE-APK-2026-______
+============================================================
+5.2 Approval Sign-Off Matrix
+Role	Reviewer Name	Signature / ID	Date	Verdict
+Technical Lead	____________________	____________________	________	[ ] PASS [ ] FAIL
+Security Engineer	____________________	____________________	________	[ ] PASS [ ] FAIL
+Project Authority	____________________	____________________	________	[ ] PASS [ ] FAIL
+5.3 Status Transition Gate
+Change status to APPROVED only when all three sign-offs are stamped PASS and all evidence fields are filled.
+If any check fails, change status to BLOCKED and open a regression issue with the specific failed stage ID.
