@@ -1,0 +1,87 @@
+name: Android Release Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ไม่มี cache:
+      # repository ไม่มี package-lock.json / yarn.lock
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Security preflight
+        run: node security-preflight.mjs
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6"
+
+      - name: Build Release APK
+        env:
+          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -e
+
+          gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Locate APK
+        run: |
+          set -e
+
+          APK=$(find . -type f -name "app-release.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "::error::app-release.apk was not generated"
+            exit 1
+          fi
+
+          echo "APK=$APK" >> "$GITHUB_ENV"
+
+          echo "Release APK:"
+          ls -lh "$APK"
+
+      - name: Generate SHA256
+        run: |
+          set -e
+
+          sha256sum "$APK" | tee APK-SHA256SUM.txt
+
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: |
+            ${{ env.APK }}
+            APK-SHA256SUM.txt
+          if-no-files-found: error
+          retention-days: 14
