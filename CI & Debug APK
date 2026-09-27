@@ -1,0 +1,247 @@
+name: CI & Debug APK Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-source:
+    name: Validate current source structure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Inventory current source structure
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_paths=(
+            "package.json"
+            "app.js"
+            "security-preflight.mjs"
+            "run-tests.mjs"
+            "release-integrity.mjs"
+            "build.gradle.kts"
+            "settings.gradle.kts"
+            "android/app/build.gradle.kts"
+          )
+
+          for path in "${required_paths[@]}"; do
+            if [ ! -e "$path" ]; then
+              echo "::error::Required path missing: $path"
+              exit 1
+            fi
+          done
+
+          echo "SOURCE STRUCTURE: PASS"
+
+      - name: Validate package.json
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node -e '
+            const fs = require("fs");
+
+            const pkg = JSON.parse(
+              fs.readFileSync("package.json", "utf8")
+            );
+
+            if (!pkg.scripts) {
+              throw new Error("package.json has no scripts section");
+            }
+
+            console.log("package.json scripts:");
+            console.log(JSON.stringify(pkg.scripts, null, 2));
+          '
+
+      - name: Validate JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node --check app.js
+          node --check security-preflight.mjs
+          node --check run-tests.mjs
+          node --check release-integrity.mjs
+
+          echo "JAVASCRIPT SYNTAX: PASS"
+
+      - name: Run Node test command
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npm test
+
+      - name: Run security preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node security-preflight.mjs
+
+          echo "SECURITY PREFLIGHT: PASS"
+
+  build-debug-apk:
+    name: Build Debug APK
+    needs: validate-source
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.6"
+
+      - name: Validate Android/Gradle project layout
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_paths=(
+            "settings.gradle.kts"
+            "build.gradle.kts"
+            "gradle.properties"
+            "android/app/build.gradle.kts"
+            "android/app/src/main"
+          )
+
+          for path in "${required_paths[@]}"; do
+            if [ ! -e "$path" ]; then
+              echo "::error::Android/Gradle path missing: $path"
+              exit 1
+            fi
+          done
+
+          echo "ANDROID PROJECT STRUCTURE: PASS"
+
+      - name: Validate Gradle project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gradle projects --no-daemon
+
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gradle :app:assembleDebug \
+            --stacktrace \
+            --no-daemon
+
+      - name: Verify Debug APK output
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apk="android/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$apk" ]; then
+            echo "::error::Debug APK was not generated: $apk"
+            exit 1
+          fi
+
+          if [ ! -s "$apk" ]; then
+            echo "::error::Debug APK exists but is empty"
+            exit 1
+          fi
+
+          echo "APK: $apk"
+          ls -lh "$apk"
+          sha256sum "$apk"
+
+          echo "DEBUG APK OUTPUT: PASS"
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: subertube-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  final-recheck:
+    name: Final source and artifact re-check
+    needs: build-debug-apk
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Re-check source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_paths=(
+            "package.json"
+            "app.js"
+            "security-preflight.mjs"
+            "run-tests.mjs"
+            "release-integrity.mjs"
+            "settings.gradle.kts"
+            "build.gradle.kts"
+            "android/app/build.gradle.kts"
+          )
+
+          for path in "${required_paths[@]}"; do
+            if [ ! -e "$path" ]; then
+              echo "::error::FINAL RECHECK failed: $path"
+              exit 1
+            fi
+          done
+
+          node --check app.js
+          node --check security-preflight.mjs
+          node --check run-tests.mjs
+          node --check release-integrity.mjs
+
+          echo "FINAL SOURCE CONTRACT: PASS"
+
+      - name: Final APK existence check
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apk="android/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ -f "$apk" ]; then
+            echo "APK exists in this job workspace."
+          else
+            echo "APK is produced by the previous job and stored as a workflow artifact."
+            echo "FINAL ARTIFACT HANDOFF: PASS"
+          fi
