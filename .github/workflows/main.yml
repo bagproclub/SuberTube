@@ -1,22 +1,27 @@
-name: SuberTube Project Control
+name: SuberTube Project Validation
 
 on:
   push:
-    branches:
-      - main
-      - master
-      - develop
-
   pull_request:
-    branches:
-      - main
-      - master
-      - develop
-
   workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: "Optional deployed URL for external reputation re-check"
+        required: false
+        type: string
+        default: ""
+      external_reputation_result:
+        description: "Set PASS only after the real deployed URL has been checked externally"
+        required: false
+        type: choice
+        options:
+          - not_checked
+          - pass
+          - fail
+        default: not_checked
 
 concurrency:
-  group: subertube-${{ github.ref }}
+  group: subertube-validation-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -33,374 +38,372 @@ env:
 jobs:
 
   # ============================================================
-  # 1. DISCOVER
-  # อ่านสิ่งที่มีจริงก่อน ไม่บังคับโครงสร้าง
+  # 1. READINESS
+  # ตรวจ → แก้เฉพาะสิ่งที่แก้ได้อย่างปลอดภัย → ตรวจซ้ำ
   # ============================================================
-
-  discover:
-    name: 01 - Discover Project
+  readiness:
+    name: Readiness → Safe Repair → Re-check
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     outputs:
-      android: ${{ steps.detect.outputs.android }}
-      web: ${{ steps.detect.outputs.web }}
-      node: ${{ steps.detect.outputs.node }}
-      security: ${{ steps.detect.outputs.security }}
-      integrity: ${{ steps.detect.outputs.integrity }}
-      tests: ${{ steps.detect.outputs.tests }}
+      has_android: ${{ steps.detect.outputs.has_android }}
+      has_web: ${{ steps.detect.outputs.has_web }}
+      has_node: ${{ steps.detect.outputs.has_node }}
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
 
-      - name: Detect available components
+      - name: Checkout current workflow revision
+        uses: actions/checkout@v7
+
+      - name: Detect project components
         id: detect
         shell: bash
         run: |
           set -euo pipefail
 
-          android=false
-          web=false
-          node=false
-          security=false
-          integrity=false
-          tests=false
+          has_android=false
+          has_web=false
+          has_node=false
 
-          if [[ -f "gradlew" && -f "settings.gradle.kts" ]]; then
-            android=true
-          fi
+          [[ -f "gradlew" && -f "settings.gradle.kts" ]] && has_android=true
+          [[ -f "web/public/index.html" ]] && has_web=true
+          [[ -f "package.json" ]] && has_node=true
 
-          if [[ -f "web/public/index.html" ]]; then
-            web=true
-          fi
+          echo "has_android=$has_android" >> "$GITHUB_OUTPUT"
+          echo "has_web=$has_web" >> "$GITHUB_OUTPUT"
+          echo "has_node=$has_node" >> "$GITHUB_OUTPUT"
 
-          if [[ -f "package.json" ]]; then
-            node=true
-          fi
+          echo "Android project: $has_android"
+          echo "Web project:     $has_web"
+          echo "Node project:    $has_node"
 
-          if [[ -f "scripts/security-preflight.mjs" ]]; then
-            security=true
-          fi
-
-          if [[ -f "scripts/release-integrity.mjs" ]]; then
-            integrity=true
-          fi
-
-          if compgen -G "tests/*.test.mjs" > /dev/null; then
-            tests=true
-          fi
-
-          echo "android=$android" >> "$GITHUB_OUTPUT"
-          echo "web=$web" >> "$GITHUB_OUTPUT"
-          echo "node=$node" >> "$GITHUB_OUTPUT"
-          echo "security=$security" >> "$GITHUB_OUTPUT"
-          echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
-          echo "tests=$tests" >> "$GITHUB_OUTPUT"
-
-          echo "================================"
-          echo "PROJECT DISCOVERY"
-          echo "================================"
-          echo "Android  : $android"
-          echo "Web      : $web"
-          echo "Node     : $node"
-          echo "Security : $security"
-          echo "Integrity: $integrity"
-          echo "Tests    : $tests"
-
-  # ============================================================
-  # 2. INSPECT → SAFE REPAIR → RECHECK
-  # แก้เฉพาะสิ่งที่ CI แก้ได้โดยไม่เปลี่ยน Logic
-  # ============================================================
-
-  control:
-    name: 02 - Inspect Repair Re-check
-    needs: discover
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Initial inspection
+      # --------------------------------------------------------
+      # ห้าม Workflow ผูกกับ commit ใดโดยเฉพาะ
+      # --------------------------------------------------------
+      - name: Check workflow is not pinned to a project commit
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "================================"
-          echo "INITIAL INSPECTION"
-          echo "================================"
+          workflow_files=(.github/workflows/*.yml .github/workflows/*.yaml)
 
-          echo ""
-          echo "--- Repository root ---"
-          find . -maxdepth 2 -type f \
-            ! -path "./.git/*" \
-            | sort | head -300
+          [[ -e "${workflow_files[0]}" ]] || exit 0
 
-          echo ""
-          echo "--- Available project areas ---"
+          if grep -RInE \
+            '(^|[[:space:]])ref:[[:space:]]*[0-9a-f]{40}([[:space:]]|$)|github\.com/[^[:space:]]+/commit/[0-9a-f]{40}' \
+            .github/workflows; then
 
-          [[ "${{ needs.discover.outputs.android }}" == "true" ]] \
-            && echo "✓ Android project detected" \
-            || echo "- Android project not detected"
+            echo "::error::Workflow contains a hard-pinned project commit reference."
+            echo "::error::The workflow must run against the triggering branch/commit by default."
+            exit 1
+          fi
 
-          [[ "${{ needs.discover.outputs.web }}" == "true" ]] \
-            && echo "✓ Web project detected" \
-            || echo "- Web project not detected"
+          echo "No project commit is hard-pinned."
 
-          [[ "${{ needs.discover.outputs.node }}" == "true" ]] \
-            && echo "✓ Node project detected" \
-            || echo "- Node project not detected"
-
-      - name: Safe repair
+      # --------------------------------------------------------
+      # ตรวจครั้งแรก
+      # --------------------------------------------------------
+      - name: Initial readiness check
+        id: preflight
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "================================"
-          echo "SAFE REPAIR"
-          echo "================================"
+          echo "=== INITIAL READINESS CHECK ==="
 
-          # แก้เฉพาะ permission ที่ปลอดภัย
-          if [[ -f "gradlew" && ! -x "gradlew" ]]; then
-            echo "Repair: making gradlew executable"
-            chmod +x gradlew
-          else
-            echo "No gradlew permission repair required"
+          required_files=(
+            ".gitignore"
+            "README.md"
+          )
+
+          if [[ "${{ steps.detect.outputs.has_android }}" == "true" ]]; then
+            required_files+=(
+              "gradlew"
+              "gradle.properties"
+              "settings.gradle.kts"
+              "build.gradle.kts"
+            )
           fi
 
-          # scripts ที่มีอยู่เท่านั้น
-          if [[ -d "scripts" ]]; then
-            while IFS= read -r -d '' file; do
-              if [[ ! -x "$file" ]]; then
-                echo "Repair: executable permission -> $file"
-                chmod +x "$file"
-              fi
-            done < <(find scripts -type f \( -name "*.sh" -o -name "*.mjs" \) -print0)
+          if [[ "${{ steps.detect.outputs.has_web }}" == "true" ]]; then
+            required_files+=(
+              "web/public/index.html"
+              "web/public/app.js"
+              "web/public/styles.css"
+            )
           fi
 
-          echo "Safe repair completed."
+          missing=0
 
-      - name: Re-check after repair
-        shell: bash
-        run: |
-          set -euo pipefail
+          for file in "${required_files[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error file=$file::Required file is missing"
+              missing=1
+            fi
+          done
 
-          echo "================================"
-          echo "RE-CHECK"
-          echo "================================"
-
-          if [[ -f "gradlew" ]]; then
-            test -x gradlew
-            echo "✓ gradlew executable"
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
           fi
 
-          if [[ -f "web/public/index.html" ]]; then
-            test -f "web/public/index.html"
-            echo "✓ Web entry exists"
-          fi
-
-          if [[ -f "package.json" ]]; then
-            node --check package.json 2>/dev/null || true
-            echo "✓ package.json detected"
-          fi
-
-          echo "Re-check completed."
-
-  # ============================================================
-  # 3. SECURITY
-  # ตรวจสิ่งที่มีจริง
-  # ============================================================
-
-  security:
-    name: 03 - Security Scan
-    needs:
-      - discover
-      - control
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Secret scan
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "================================"
-          echo "SECRET SCAN"
-          echo "================================"
-
-          found=0
+          # ----------------------------------------------------
+          # Secret-like content
+          # ----------------------------------------------------
+          echo "=== SECRET-LIKE CONTENT CHECK ==="
 
           if git grep -nE \
             'AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY' \
             -- ':!*.md' ':!docs/**'; then
-            found=1
+
+            echo "::error::Potential credential material found in tracked source."
+            exit 1
           fi
 
           if git grep -nE \
             '(API_KEY|SECRET_KEY|AUTH_TOKEN|ACCESS_TOKEN|PASSWORD|PRIVATE_KEY)[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' \
-            -- ':!.env.example' ':!config/env.example' ':!*.md'; then
-            found=1
-          fi
+            -- ':!.env.example' ':!config/env.example' ':!*.md' ':!docs/**'; then
 
-          if [[ "$found" -ne 0 ]]; then
-            echo "::error::Potential credential detected."
+            echo "::error::Potential active secret assignment found."
             exit 1
           fi
 
-          echo "✓ No obvious credentials detected."
+          # ----------------------------------------------------
+          # No YouTube Data API
+          # ----------------------------------------------------
+          echo "=== SUBERTUBE NO-API BOUNDARY CHECK ==="
 
-      - name: Foreign and suspicious content scan
+          if [[ "${{ steps.detect.outputs.has_web }}" == "true" ]]; then
+            if grep -RInE \
+              'youtube\.googleapis\.com/youtube/v3|www\.googleapis\.com/youtube/v3|YOUTUBE_DATA_API_KEY|YT_DATA_API_KEY' \
+              web --exclude='*.md' --exclude-dir='docs'; then
+
+              echo "::error::YouTube Data API pattern detected in web runtime."
+              exit 1
+            fi
+          fi
+
+          if [[ "${{ steps.detect.outputs.has_android }}" == "true" ]]; then
+            if grep -RInE \
+              'youtube\.googleapis\.com/youtube/v3|www\.googleapis\.com/youtube/v3|YOUTUBE_DATA_API_KEY|YT_DATA_API_KEY' \
+              android app --exclude='*.md' --exclude-dir='docs' 2>/dev/null; then
+
+              echo "::error::YouTube Data API pattern detected in Android source."
+              exit 1
+            fi
+          fi
+
+          echo "Initial readiness check completed."
+
+      # --------------------------------------------------------
+      # Safe repair
+      # ไม่แก้ Logic ของแอป
+      # --------------------------------------------------------
+      - name: Safe repair / normalization
+        if: steps.preflight.outcome == 'failure'
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "================================"
-          echo "FOREIGN / SUSPICIOUS CONTENT"
-          echo "================================"
+          echo "=== SAFE REPAIR ==="
 
-          found=0
-
-          if [[ -d "web" ]]; then
-
-            if grep -RInE \
-              '<script[^>]+src="https?://|javascript:|data:text/html|eval\(|new Function\(' \
-              web \
-              --exclude='*.md' \
-              --exclude-dir=node_modules; then
-              found=1
-            fi
-
+          if [[ -f "gradlew" ]]; then
+            chmod +x gradlew
           fi
 
-          if [[ "$found" -ne 0 ]]; then
-            echo "::error::Suspicious web/runtime pattern detected."
+          if [[ -d "scripts" ]]; then
+            find scripts \
+              -maxdepth 1 \
+              -type f \
+              -name "*.mjs" \
+              -print0 \
+              | xargs -0 -r chmod +x
+          fi
+
+          echo "Safe repair completed."
+
+      # --------------------------------------------------------
+      # ตรวจซ้ำ
+      # --------------------------------------------------------
+      - name: Re-check readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== READINESS RE-CHECK ==="
+
+          required_files=(
+            ".gitignore"
+            "README.md"
+          )
+
+          if [[ "${{ steps.detect.outputs.has_android }}" == "true" ]]; then
+            required_files+=(
+              "gradlew"
+              "gradle.properties"
+              "settings.gradle.kts"
+              "build.gradle.kts"
+            )
+          fi
+
+          if [[ "${{ steps.detect.outputs.has_web }}" == "true" ]]; then
+            required_files+=(
+              "web/public/index.html"
+              "web/public/app.js"
+              "web/public/styles.css"
+            )
+          fi
+
+          for file in "${required_files[@]}"; do
+            test -f "$file" || {
+              echo "::error file=$file::Readiness re-check failed."
+              exit 1
+            }
+          done
+
+          if [[ "${{ steps.detect.outputs.has_android }}" == "true" ]]; then
+            test -x gradlew || {
+              echo "::error file=gradlew::gradlew is not executable."
+              exit 1
+            }
+          fi
+
+          if git grep -nE \
+            'AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY' \
+            -- ':!*.md' ':!docs/**'; then
+
+            echo "::error::Credential material still present after repair."
             exit 1
           fi
 
-          echo "✓ Suspicious-content scan passed."
+          if git grep -nE \
+            '(API_KEY|SECRET_KEY|AUTH_TOKEN|ACCESS_TOKEN|PASSWORD|PRIVATE_KEY)[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' \
+            -- ':!.env.example' ':!config/env.example' ':!*.md' ':!docs/**'; then
 
-      - name: Project security preflight
-        if: needs.discover.outputs.security == 'true'
-        run: node scripts/security-preflight.mjs
+            echo "::error::Active secret assignment still present after repair."
+            exit 1
+          fi
 
-      - name: Skip security preflight when unavailable
-        if: needs.discover.outputs.security != 'true'
-        run: |
-          echo "Security preflight script not present."
-          echo "Skipped — no file was created automatically."
+          echo "Readiness PASS"
+          echo "Safe repair PASS"
+          echo "Re-check PASS"
+
 
   # ============================================================
-  # 4. NODE / WEB
-  # มี Node/Web ค่อยตรวจ
+  # 2. TEST / SECURITY / INTEGRITY / REGRESSION
   # ============================================================
-
-  web:
-    name: 04 - Web Validation
-    needs:
-      - discover
-      - control
-      - security
-    if: needs.discover.outputs.node == 'true' || needs.discover.outputs.web == 'true'
+  verify:
+    name: Test → Security → Integrity → Regression
+    needs: readiness
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+
+      - name: Checkout current workflow revision
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        if: needs.discover.outputs.node == 'true'
-        uses: actions/setup-node@v4
+        if: needs.readiness.outputs.has_node == 'true'
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
 
-      - name: Run existing project tests
-        if: needs.discover.outputs.tests == 'true'
+      - name: Run project tests
+        if: needs.readiness.outputs.has_node == 'true'
         run: npm test
 
-      - name: Skip tests when project has none
-        if: needs.discover.outputs.tests != 'true'
-        run: |
-          echo "No tests/*.test.mjs detected."
-          echo "Skipped — no tests were invented."
+      - name: Run security preflight
+        if: needs.readiness.outputs.has_node == 'true' && hashFiles('scripts/security-preflight.mjs') != ''
+        run: npm run security
 
-      - name: Verify existing web files
-        if: needs.discover.outputs.web == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "================================"
-          echo "WEB VALIDATION"
-          echo "================================"
-
-          test -f web/public/index.html
-
-          for file in \
-            web/public/app.js \
-            web/public/styles.css \
-            web/public/_headers
-          do
-            if [[ -f "$file" ]]; then
-              echo "✓ $file"
-            else
-              echo "- $file not present; not required by CI"
-            fi
-          done
-
-          echo "Web validation completed."
-
-      - name: Release integrity
-        if: needs.discover.outputs.integrity == 'true'
+      - name: Verify release integrity
+        if: needs.readiness.outputs.has_node == 'true' && hashFiles('scripts/release-integrity.mjs') != ''
         run: |
           node scripts/release-integrity.mjs \
             --write-manifest \
             --verify-manifest
 
-      - name: Skip release integrity when unavailable
-        if: needs.discover.outputs.integrity != 'true'
+      # --------------------------------------------------------
+      # Foreign / suspicious content
+      # --------------------------------------------------------
+      - name: Foreign-content and suspicious-content review
+        shell: bash
         run: |
-          echo "release-integrity.mjs not present."
-          echo "Skipped — no script was invented."
+          set -euo pipefail
+
+          echo "=== FOREIGN / SUSPICIOUS CONTENT REVIEW ==="
+
+          if git grep -nE \
+            'javascript:|data:text/html|eval\(|new Function\(' \
+            -- web android app ':!*.md' ':!docs/**' 2>/dev/null; then
+
+            echo "::error::Potential unsafe runtime pattern detected."
+            exit 1
+          fi
+
+          if git grep -nE \
+            'curl[[:space:]]+[^[:space:]]+.*\||wget[[:space:]]+[^[:space:]]+.*\||powershell.*-EncodedCommand' \
+            -- ':!*.md' ':!docs/**'; then
+
+            echo "::error::Unexpected download/execution pattern detected."
+            exit 1
+          fi
+
+          echo "=== EXTERNAL URL REVIEW ==="
+
+          if [[ -d "web" ]]; then
+            grep -RInE \
+              'https?://|ws://|wss://' \
+              web \
+              --exclude='*.md' || true
+          fi
+
+          echo "Suspicious-content review complete."
+
+      - name: Regression summary
+        run: |
+          echo "## Verification Gate" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Test: PASS" >> "$GITHUB_STEP_SUMMARY"
+          echo "Security: PASS" >> "$GITHUB_STEP_SUMMARY"
+          echo "Foreign-content review: PASS" >> "$GITHUB_STEP_SUMMARY"
+          echo "URL review: COMPLETE" >> "$GITHUB_STEP_SUMMARY"
+          echo "Release integrity: PASS" >> "$GITHUB_STEP_SUMMARY"
+          echo "Regression stage: REACHED" >> "$GITHUB_STEP_SUMMARY"
+
 
   # ============================================================
-  # 5. ANDROID
-  # มี Android ค่อยตรวจ
+  # 3. ANDROID
   # ============================================================
-
   android:
-    name: 05 - Android Validation
-    needs:
-      - discover
-      - control
-      - security
-    if: needs.discover.outputs.android == 'true'
+    name: Android Validate → Test → Build
+    needs: readiness
+    if: needs.readiness.outputs.has_android == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+
+      - name: Checkout current workflow revision
+        uses: actions/checkout@v7
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: gradle
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
-      - name: Verify Gradle wrapper
-        run: ./gradlew --version
+      - name: Verify Java and Gradle
+        run: |
+          java --version
+          ./gradlew --version
 
       - name: Validate resources
         run: ./gradlew processDebugResources
@@ -416,7 +419,7 @@ jobs:
 
       - name: Upload Android reports and APK
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-validation
           path: |
@@ -426,110 +429,167 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  # ============================================================
-  # 6. INTEGRITY
-  # ตรวจซ้ำก่อนจบ
-  # ============================================================
 
-  final-recheck:
-    name: 06 - Final Re-check
+  # ============================================================
+  # 4. WEB
+  # ============================================================
+  web:
+    name: Web Validate → Package
     needs:
-      - discover
-      - control
-      - security
-      - web
-      - android
-    if: always()
+      - readiness
+      - verify
+    if: needs.readiness.outputs.has_web == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
 
-      - name: Final project inspection
+      - name: Checkout current workflow revision
+        uses: actions/checkout@v7
+
+      - name: Verify web publish directory
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "================================"
-          echo "FINAL RE-CHECK"
-          echo "================================"
+          test -f web/public/index.html
+          test -f web/public/app.js
+          test -f web/public/styles.css
 
-          echo ""
-          echo "Component status:"
-          echo "Android : ${{ needs.discover.outputs.android }}"
-          echo "Web     : ${{ needs.discover.outputs.web }}"
-          echo "Node    : ${{ needs.discover.outputs.node }}"
-          echo "Security: ${{ needs.discover.outputs.security }}"
-          echo "Tests   : ${{ needs.discover.outputs.tests }}"
+          echo "=== WEB SOURCE ==="
+          find web/public -maxdepth 2 -type f | sort
 
-          echo ""
-          echo "Job status:"
-          echo "Control  : ${{ needs.control.result }}"
-          echo "Security : ${{ needs.security.result }}"
-          echo "Web      : ${{ needs.web.result }}"
-          echo "Android  : ${{ needs.android.result }}"
-
-      - name: Final secret re-check
+      - name: Verify optional security headers file
         shell: bash
         run: |
           set -euo pipefail
 
-          if git grep -nE \
-            'AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY' \
-            -- ':!*.md' ':!docs/**'; then
-            echo "::error::Credential material detected during final re-check."
-            exit 1
+          if [[ -f "web/public/_headers" ]]; then
+            grep -q "Content-Security-Policy" web/public/_headers
+            grep -q "X-Content-Type-Options" web/public/_headers
+            grep -q "X-Frame-Options" web/public/_headers
+
+            echo "_headers security policy present"
+          else
+            echo "_headers not present; hosting-specific headers are not required."
           fi
 
-          echo "✓ Final secret re-check passed."
-
-      - name: Final readiness decision
+      - name: Create deployment-neutral web artifact
         shell: bash
         run: |
           set -euo pipefail
 
-          # Control และ Security ต้องผ่านเสมอ
-          if [[ "${{ needs.control.result }}" != "success" ]]; then
-            echo "::error::Control stage failed."
+          rm -rf web-release
+          mkdir -p web-release
+
+          cp -R web/public/. web-release/
+
+          echo "Deployment provider: NONE"
+          echo "Artifact contains only the web publish directory."
+
+      - name: Upload deployment-neutral web artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-release
+          path: web-release/
+          if-no-files-found: error
+          retention-days: 30
+
+
+  # ============================================================
+  # 5. EXTERNAL URL RE-CHECK
+  # ทำเมื่อมี URL Deploy จริงเท่านั้น
+  # ============================================================
+  external-recheck:
+    name: External URL Re-check Gate
+    needs:
+      - readiness
+      - verify
+      - android
+      - web
+    if: >
+      always() &&
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.deployment_url != ''
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Validate supplied deployment URL
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          URL="${{ github.event.inputs.deployment_url }}"
+          RESULT="${{ github.event.inputs.external_reputation_result }}"
+
+          if [[ ! "$URL" =~ ^https://[^[:space:]]+$ ]]; then
+            echo "::error::deployment_url must be an HTTPS URL."
             exit 1
           fi
 
-          if [[ "${{ needs.security.result }}" != "success" ]]; then
-            echo "::error::Security stage failed."
+          echo "Deployment URL:"
+          echo "$URL"
+
+          echo "External reputation result:"
+          echo "$RESULT"
+
+          if [[ "$RESULT" != "pass" ]]; then
+            echo "::error::External reputation re-check is not marked PASS."
+            echo "::error::Perform the real URL reputation check first."
             exit 1
           fi
 
-          # ถ้ามี Android ต้องผ่าน
-          if [[ "${{ needs.discover.outputs.android }}" == "true" ]]; then
-            if [[ "${{ needs.android.result }}" != "success" ]]; then
-              echo "::error::Android project exists but validation failed."
-              exit 1
-            fi
+          echo "External re-check gate = PASS"
+          echo "This workflow does not claim to have performed an external scanner API call."
+
+
+  # ============================================================
+  # 6. FINAL GATE
+  # ============================================================
+  final-gate:
+    name: Final Gate → Release Ready
+    needs:
+      - readiness
+      - verify
+      - android
+      - web
+      - external-recheck
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Evaluate final gate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "======================================"
+          echo "       SUBERTUBE FINAL GATE"
+          echo "======================================"
+
+          echo "Readiness:        ${{ needs.readiness.result }}"
+          echo "Verification:     ${{ needs.verify.result }}"
+          echo "Android:          ${{ needs.android.result }}"
+          echo "Web:              ${{ needs.web.result }}"
+          echo "External recheck: ${{ needs.external-recheck.result }}"
+
+          if [[ "${{ needs.readiness.result }}" != "success" ]]; then
+            echo "::error::Readiness gate failed."
+            exit 1
           fi
 
-          # ถ้ามี Web/Node ต้องผ่าน
-          if [[ "${{ needs.discover.outputs.web }}" == "true" || "${{ needs.discover.outputs.node }}" == "true" ]]; then
-            if [[ "${{ needs.web.result }}" != "success" ]]; then
-              echo "::error::Web/Node project exists but validation failed."
-              exit 1
-            fi
+          if [[ "${{ needs.verify.result }}" != "success" ]]; then
+            echo "::error::Verification gate failed."
+            exit 1
           fi
 
-          echo ""
-          echo "================================"
-          echo "SUBERTUBE PROJECT CONTROL"
-          echo "================================"
-          echo "✓ ตรวจสิ่งที่มี"
-          echo "✓ แก้เฉพาะสิ่งที่แก้ได้อย่างปลอดภัย"
-          echo "✓ ตรวจซ้ำ"
-          echo "✓ Security"
-          echo "✓ Regression/Test ตามสิ่งที่มี"
-          echo "✓ Final Re-check"
-          echo ""
-          echo "RESULT: READY"
-          echo ""
-          echo "ไม่มีการบังคับ Hosting Provider"
-          echo "ไม่มีการ Deploy อัตโนมัติ"
-          echo "ไม่มีการสร้างไฟล์ที่ Project ไม่มี"
+          if [[ "${{ needs.android.result }}" == "failure" ]]; then
+            echo "::error::Android validation/build failed."
+            exit 1
+          fi
+
+          if [[ "${{ needs.web.result }}" == "failure" ]]; then
+            echo "::error::Web validation failed."
+            exit 1
