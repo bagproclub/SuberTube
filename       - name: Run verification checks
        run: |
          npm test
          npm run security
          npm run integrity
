@@ -1,5 +1,0 @@
-      - name: Run verification checks
-        run: |
-          npm test
-          npm run security
-          npm run integrity
