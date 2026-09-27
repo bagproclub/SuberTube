@@ -1,4 +1,4 @@
-SuberTube Build Error Troubleshooting Guide
+
 🎯 Quick Diagnosis Tool
 When you encounter a build error, use this flowchart to identify and resolve:
 
