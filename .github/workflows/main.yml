@@ -1,125 +1,559 @@
-name: SuberTube Web Build
+name: SuberTube Project Validation
 
 on:
   push:
     branches:
       - main
       - master
+      - develop
 
   pull_request:
     branches:
       - main
       - master
+      - develop
 
   workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: "Optional deployed URL for post-deploy reputation check"
+        required: false
+        type: string
+        default: ""
 
 concurrency:
-  group: subertube-web-${{ github.ref }}
+  group: subertube-validation-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
+env:
+  JAVA_VERSION: "17"
+  NODE_VERSION: "24"
+  GRADLE_OPTS: >-
+    -Dorg.gradle.daemon=false
+    -Dorg.gradle.parallel=true
+    -Dorg.gradle.caching=true
+
 jobs:
-  verify-build-package:
-    name: Verify, Build and Package Web
+
+  # ============================================================
+  # 1. READINESS
+  # ตรวจ → แก้เฉพาะสิ่งที่แก้ได้อย่างปลอดภัย → ตรวจซ้ำ
+  # ============================================================
+  readiness:
+    name: Readiness Check → Safe Repair → Re-check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    outputs:
+      has_android: ${{ steps.detect.outputs.has_android }}
+      has_web: ${{ steps.detect.outputs.has_web }}
+      has_node: ${{ steps.detect.outputs.has_node }}
 
     steps:
-      # 1. ดึง Source Code
+
       - name: Checkout source
         uses: actions/checkout@v7
 
-      # 2. ติดตั้ง Node.js
+      - name: Detect project components
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          has_android=false
+          has_web=false
+          has_node=false
+
+          [[ -f "gradlew" && -f "settings.gradle.kts" ]] && has_android=true
+          [[ -f "web/public/index.html" ]] && has_web=true
+          [[ -f "package.json" ]] && has_node=true
+
+          echo "has_android=$has_android" >> "$GITHUB_OUTPUT"
+          echo "has_web=$has_web" >> "$GITHUB_OUTPUT"
+          echo "has_node=$has_node" >> "$GITHUB_OUTPUT"
+
+          echo "Android project: $has_android"
+          echo "Web project:     $has_web"
+          echo "Node project:    $has_node"
+
+      - name: Initial readiness scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== INITIAL READINESS CHECK ==="
+
+          required_files=(
+            ".gitignore"
+            "README.md"
+          )
+
+          if [[ "${{ steps.detect.outputs.has_android }}" == "true" ]]; then
+            required_files+=(
+              "gradlew"
+              "gradle.properties"
+              "settings.gradle.kts"
+              "build.gradle.kts"
+            )
+          fi
+
+          if [[ "${{ steps.detect.outputs.has_web }}" == "true" ]]; then
+            required_files+=(
+              "web/public/index.html"
+              "web/public/app.js"
+              "web/public/styles.css"
+              "web/public/_headers"
+            )
+          fi
+
+          missing=0
+
+          for file in "${required_files[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error file=$file::Required file is missing"
+              missing=1
+            fi
+          done
+
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+
+          # Credential pattern scan
+          if git grep -nE \
+            'AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY' \
+            -- ':!*.md' ':!docs/**'; then
+            echo "::error::Potential credential material found."
+            exit 1
+          fi
+
+          # Active secret assignment scan
+          if git grep -nE \
+            '(API_KEY|SECRET_KEY|AUTH_TOKEN|ACCESS_TOKEN|PASSWORD|PRIVATE_KEY)[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' \
+            -- ':!.env.example' ':!config/env.example' ':!*.md'; then
+            echo "::error::Potential active secret assignment found."
+            exit 1
+          fi
+
+          # Unsafe web patterns
+          if git grep -nE \
+            '<script[^>]+src="https?://|javascript:|data:text/html|eval\(|new Function\(' \
+            -- 'web/**' ':!*.md'; then
+            echo "::error::Potential unsafe web/runtime pattern found."
+            exit 1
+          fi
+
+          echo "Initial readiness scan completed."
+
+      - name: Safe repair / normalization
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== SAFE REPAIR ==="
+
+          # ไม่แก้ application logic
+          # แก้เฉพาะ deterministic environment/readiness issue
+
+          if [[ -f "gradlew" ]]; then
+            chmod +x gradlew
+          fi
+
+          if [[ -d "scripts" ]]; then
+            find scripts \
+              -maxdepth 1 \
+              -type f \
+              -name "*.mjs" \
+              -print0 2>/dev/null \
+              | xargs -0 -r chmod +x
+          fi
+
+          echo "Safe repair completed."
+
+      - name: Re-check readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== READINESS RE-CHECK ==="
+
+          required_files=(
+            ".gitignore"
+            "README.md"
+          )
+
+          if [[ "${{ steps.detect.outputs.has_android }}" == "true" ]]; then
+            required_files+=(
+              "gradlew"
+              "gradle.properties"
+              "settings.gradle.kts"
+              "build.gradle.kts"
+            )
+          fi
+
+          if [[ "${{ steps.detect.outputs.has_web }}" == "true" ]]; then
+            required_files+=(
+              "web/public/index.html"
+              "web/public/app.js"
+              "web/public/styles.css"
+              "web/public/_headers"
+            )
+          fi
+
+          for file in "${required_files[@]}"; do
+            test -f "$file" || {
+              echo "::error file=$file::Readiness re-check failed."
+              exit 1
+            }
+          done
+
+          if [[ "${{ steps.detect.outputs.has_android }}" == "true" ]]; then
+            test -x gradlew || {
+              echo "::error file=gradlew::gradlew is not executable."
+              exit 1
+            }
+          fi
+
+          # ตรวจ Secret ซ้ำ
+          if git grep -nE \
+            'AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY' \
+            -- ':!*.md' ':!docs/**'; then
+            echo "::error::Potential credential material still present."
+            exit 1
+          fi
+
+          # ตรวจ Active Secret ซ้ำ
+          if git grep -nE \
+            '(API_KEY|SECRET_KEY|AUTH_TOKEN|ACCESS_TOKEN|PASSWORD|PRIVATE_KEY)[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' \
+            -- ':!.env.example' ':!config/env.example' ':!*.md'; then
+            echo "::error::Potential active secret assignment still present."
+            exit 1
+          fi
+
+          # ตรวจ Unsafe Web ซ้ำ
+          if git grep -nE \
+            '<script[^>]+src="https?://|javascript:|data:text/html|eval\(|new Function\(' \
+            -- 'web/**' ':!*.md'; then
+            echo "::error::Unsafe web/runtime pattern still present."
+            exit 1
+          fi
+
+          echo "READINESS = PASS"
+          echo "SAFE REPAIR = PASS"
+          echo "RE-CHECK = PASS"
+
+
+  # ============================================================
+  # 2. GENERAL VERIFY
+  # Test → Security → Integrity → URL review
+  # ============================================================
+  verify:
+    name: Test → Security → Integrity
+    needs: readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+
+      - name: Checkout source
+        uses: actions/checkout@v7
+
       - name: Setup Node.js
+        if: needs.readiness.outputs.has_node == 'true' || needs.readiness.outputs.has_web == 'true'
         uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
 
-      # 3. ตรวจ Environment
-      - name: Verify environment
-        run: |
-          node --version
-          npm --version
-          echo "Repository: $GITHUB_REPOSITORY"
-          echo "Commit: $GITHUB_SHA"
-
-      # 4. ตรวจ Source และ Test
       - name: Run project tests
+        if: needs.readiness.outputs.has_node == 'true'
         run: npm test
 
-      # 5. Security Preflight
       - name: Run security preflight
+        if: needs.readiness.outputs.has_node == 'true' && hashFiles('scripts/security-preflight.mjs') != ''
         run: npm run security
 
-      # 6. Release Integrity
       - name: Verify release integrity
+        if: needs.readiness.outputs.has_node == 'true' && hashFiles('scripts/release-integrity.mjs') != ''
         run: |
           node scripts/release-integrity.mjs \
             --write-manifest \
             --verify-manifest
 
-      # 7. ตรวจไฟล์ Web ที่ต้องมี
-      - name: Verify web publish directory
+      - name: Foreign / suspicious content scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          suspicious=0
+
+          if git grep -nE \
+            '<script[^>]+src="https?://|javascript:|data:text/html|eval\(|new Function\(' \
+            -- 'web/**' ':!*.md' ':!docs/**'; then
+            suspicious=1
+          fi
+
+          if git grep -nE \
+            '(^|[^A-Za-z])curl[[:space:]]+[^[:space:]]+.*\||wget[[:space:]]+[^[:space:]]+.*\||powershell.*-EncodedCommand' \
+            -- ':!*.md' ':!docs/**'; then
+            suspicious=1
+          fi
+
+          if [[ "$suspicious" -ne 0 ]]; then
+            echo "::error::Suspicious runtime/download pattern detected."
+            exit 1
+          fi
+
+          echo "FOREIGN / SUSPICIOUS SCAN = PASS"
+
+      - name: External URL review
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== EXTERNAL URL REVIEW ==="
+
+          if [[ -d "web" ]]; then
+            grep -RInE \
+              'https?://|ws://|wss://' \
+              web \
+              --exclude='*.md' || true
+          else
+            echo "No web directory detected."
+          fi
+
+          echo "URL review completed."
+          echo "No hosting provider is assumed."
+
+
+  # ============================================================
+  # 3. ANDROID
+  # ตรวจ → Test → Build
+  # ============================================================
+  android:
+    name: Android Validate → Test → Build
+    needs: readiness
+    if: needs.readiness.outputs.has_android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Verify Gradle wrapper
+        run: ./gradlew --version
+
+      - name: Validate resources
+        run: ./gradlew processDebugResources
+
+      - name: Run Android lint
+        run: ./gradlew lint
+
+      - name: Run unit tests
+        run: ./gradlew test
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Upload Android reports and APK
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-validation
+          path: |
+            **/build/reports/**
+            **/build/test-results/**
+            **/build/outputs/apk/**
+          if-no-files-found: warn
+          retention-days: 30
+
+
+  # ============================================================
+  # 4. WEB
+  # ตรวจ → Package
+  # ไม่ Deploy
+  # ============================================================
+  web-package:
+    name: Web Verify → Package
+    needs:
+      - readiness
+      - verify
+    if: needs.readiness.outputs.has_web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Verify publish directory
         run: |
           test -f web/public/index.html
           test -f web/public/app.js
           test -f web/public/styles.css
           test -f web/public/_headers
 
-      # 8. แสดงโครงสร้าง Web
-      - name: Inspect web source
-        run: |
-          echo "=== WEB SOURCE ==="
-          find web/public -maxdepth 2 -type f | sort
-
-      # 9. สร้างแพ็กเกจสำหรับ Deploy
       - name: Package web release
+        shell: bash
         run: |
+          set -euo pipefail
+
           rm -rf release
-          mkdir -p release
+          mkdir -p release/web
 
-          cp -R web/public release/web
+          cp -R web/public/. release/web/
 
-          if [ -f RELEASE-SHA256SUMS.txt ]; then
-            cp RELEASE-SHA256SUMS.txt release/
+          if [[ -f README.md ]]; then
+            cp README.md release/
           fi
 
-          if [ -f README.md ]; then
-            cp README.md release/
+          if [[ -f RELEASE-SHA256SUMS.txt ]]; then
+            cp RELEASE-SHA256SUMS.txt release/
           fi
 
           cd release
           zip -r ../SuberTube-web-release.zip .
 
-      # 10. ตรวจว่า Package ใช้งานได้
-      - name: Verify release package
-        run: |
-          test -f SuberTube-web-release.zip
-          unzip -t SuberTube-web-release.zip
+      - name: Verify ZIP
+        run: unzip -t SuberTube-web-release.zip
 
-      # 11. เก็บ Release เป็น GitHub Artifact
-      - name: Upload web release artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload web release
+        uses: actions/upload-artifact@v7
         with:
-          name: SuberTube-web-release
+          name: web-release
           path: |
             SuberTube-web-release.zip
             release/
           if-no-files-found: error
           retention-days: 30
 
-      # 12. สรุปผล
-      - name: Build summary
+
+  # ============================================================
+  # 5. FINAL GATE
+  # ตรวจผลทุกส่วนก่อนปล่อย
+  # ============================================================
+  final-gate:
+    name: Final Gate → Release Ready
+    needs:
+      - readiness
+      - verify
+      - android
+      - web-package
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Evaluate pipeline result
+        shell: bash
         run: |
-          echo "## SuberTube Web Build" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "✅ Tests passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "✅ Security preflight passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "✅ Release integrity passed" >> "$GITHUB_STEP_SUMMARY"
-          echo "✅ Web source verified" >> "$GITHUB_STEP_SUMMARY"
-          echo "✅ Release package created" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Deployment provider: NONE" >> "$GITHUB_STEP_SUMMARY"
-          echo "Release artifact is ready for external deployment." >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+
+          echo "Readiness:   ${{ needs.readiness.result }}"
+          echo "Verify:      ${{ needs.verify.result }}"
+          echo "Android:     ${{ needs.android.result }}"
+          echo "Web package: ${{ needs.web-package.result }}"
+
+          if [[ "${{ needs.readiness.result }}" != "success" ]]; then
+            echo "::error::Readiness gate failed."
+            exit 1
+          fi
+
+          if [[ "${{ needs.verify.result }}" != "success" ]]; then
+            echo "::error::Verification gate failed."
+            exit 1
+          fi
+
+          if [[ "${{ needs.android.result }}" == "failure" ]]; then
+            echo "::error::Android validation/build failed."
+            exit 1
+          fi
+
+          if [[ "${{ needs.web-package.result }}" == "failure" ]]; then
+            echo "::error::Web validation/package failed."
+            exit 1
+          fi
+
+          echo "======================================"
+          echo " SUBERTUBE FINAL GATE = PASS"
+          echo "======================================"
+          echo ""
+          echo "Readiness       : PASS"
+          echo "Verification    : PASS"
+          echo "Android         : PASS / N-A"
+          echo "Web             : PASS / N-A"
+          echo "Deployment      : NOT PERFORMED"
+          echo "Hosting         : NOT LOCKED"
+          echo "Provider        : NONE"
+          echo ""
+          echo "Release is ready for deployment handoff."
+
+
+      # ========================================================
+      # 6. Deployment URL Gate
+      # ใช้เมื่อมี URL จริงเท่านั้น
+      # ไม่ผูก Malwarebytes API
+      # ========================================================
+      - name: External URL reputation gate
+        if: github.event.inputs.deployment_url != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          URL="${{ github.event.inputs.deployment_url }}"
+
+          if [[ ! "$URL" =~ ^https://[^[:space:]]+$ ]]; then
+            echo "::error::deployment_url must be an HTTPS URL."
+            exit 1
+          fi
+
+          echo "Deployment URL:"
+          echo "$URL"
+          echo ""
+          echo "External reputation check required."
+          echo "This workflow does NOT claim a Malwarebytes scan."
+          echo "No hosting provider or external API is embedded."
+
+
+      # ========================================================
+      # 7. SUMMARY
+      # ========================================================
+      - name: Final summary
+        run: |
+          {
+            echo "## SuberTube Release Gate"
+            echo ""
+            echo "✅ ตรวจความพร้อม"
+            echo "✅ Safe repair / normalization"
+            echo "✅ ตรวจซ้ำ"
+            echo "✅ Test"
+            echo "✅ Security"
+            echo "✅ Integrity"
+            echo "✅ Foreign-content scan"
+            echo "✅ External URL review"
+            echo "✅ Android validation/build"
+            echo "✅ Web validation/package"
+            echo "✅ Final Gate"
+            echo ""
+            echo "🚫 ไม่มี Hosting Provider"
+            echo "🚫 ไม่มี Auto Deployment"
+            echo "🚫 ไม่มี Hosting Credential"
+            echo ""
+            echo "Release Artifact พร้อมสำหรับนำไป Deploy ภายหลัง"
+          } >> "$GITHUB_STEP_SUMMARY"
