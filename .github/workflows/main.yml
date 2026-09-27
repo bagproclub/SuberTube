@@ -1,0 +1,125 @@
+name: SuberTube Web Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+  pull_request:
+    branches:
+      - main
+      - master
+
+  workflow_dispatch:
+
+concurrency:
+  group: subertube-web-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-build-package:
+    name: Verify, Build and Package Web
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. ดึง Source Code
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      # 2. ติดตั้ง Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      # 3. ตรวจ Environment
+      - name: Verify environment
+        run: |
+          node --version
+          npm --version
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Commit: $GITHUB_SHA"
+
+      # 4. ตรวจ Source และ Test
+      - name: Run project tests
+        run: npm test
+
+      # 5. Security Preflight
+      - name: Run security preflight
+        run: npm run security
+
+      # 6. Release Integrity
+      - name: Verify release integrity
+        run: |
+          node scripts/release-integrity.mjs \
+            --write-manifest \
+            --verify-manifest
+
+      # 7. ตรวจไฟล์ Web ที่ต้องมี
+      - name: Verify web publish directory
+        run: |
+          test -f web/public/index.html
+          test -f web/public/app.js
+          test -f web/public/styles.css
+          test -f web/public/_headers
+
+      # 8. แสดงโครงสร้าง Web
+      - name: Inspect web source
+        run: |
+          echo "=== WEB SOURCE ==="
+          find web/public -maxdepth 2 -type f | sort
+
+      # 9. สร้างแพ็กเกจสำหรับ Deploy
+      - name: Package web release
+        run: |
+          rm -rf release
+          mkdir -p release
+
+          cp -R web/public release/web
+
+          if [ -f RELEASE-SHA256SUMS.txt ]; then
+            cp RELEASE-SHA256SUMS.txt release/
+          fi
+
+          if [ -f README.md ]; then
+            cp README.md release/
+          fi
+
+          cd release
+          zip -r ../SuberTube-web-release.zip .
+
+      # 10. ตรวจว่า Package ใช้งานได้
+      - name: Verify release package
+        run: |
+          test -f SuberTube-web-release.zip
+          unzip -t SuberTube-web-release.zip
+
+      # 11. เก็บ Release เป็น GitHub Artifact
+      - name: Upload web release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SuberTube-web-release
+          path: |
+            SuberTube-web-release.zip
+            release/
+          if-no-files-found: error
+          retention-days: 30
+
+      # 12. สรุปผล
+      - name: Build summary
+        run: |
+          echo "## SuberTube Web Build" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ Tests passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ Security preflight passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ Release integrity passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ Web source verified" >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ Release package created" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deployment provider: NONE" >> "$GITHUB_STEP_SUMMARY"
+          echo "Release artifact is ready for external deployment." >> "$GITHUB_STEP_SUMMARY"
