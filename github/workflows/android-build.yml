@@ -1,0 +1,4 @@
+git clone https://github.com/bagproclub/SuberTube.git && cd SuberTube
+cp -r /mnt/agents/output/hotfix /tmp/hotfix
+bash /tmp/hotfix/hotfix-front.sh
+# ตรวจ git status ด้วยตา → แล้ว commit เอง
