@@ -1,4 +1,4 @@
-SuberTube — Current Project State (README)
+SuberTube — Current Project State
 
 > ชั้นเอกสาร: ไฟล์นี้คือ Current Project State — สถานะจริงของโปรเจกต์ ณ วันที่อัปเดตล่าสุด
 เป็นเอกสารชั้นล่างสุดของ chain ตาม MASTER GUIDE (One canonical home — เรื่องเดียวมีแหล่งหลักเดียว)
